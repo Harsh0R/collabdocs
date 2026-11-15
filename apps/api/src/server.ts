@@ -12,6 +12,7 @@ import userRoutes from "./routes/user.routes.js";
 
 import { prisma } from "./config/prisma.js";
 import { errorHandler } from "./middleware/error.middleware.js";
+import documentRoutes from "./routes/document.routes.js";
 
 const app = express();
 
@@ -79,6 +80,8 @@ app.use("/api/auth", authRoutes);
 
 // User APIs
 app.use("/api/users", userRoutes);
+
+app.use("/api/documents", documentRoutes);
 
 // Unknown routes
 app.use((_req, res) => {
