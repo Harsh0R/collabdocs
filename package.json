@@ -1,0 +1,24 @@
+{
+  "name": "collabdocs",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/web",
+    "apps/api",
+    "apps/sync",
+    "packages/database"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n WEB,API,SYNC \"npm run dev -w @collabdocs/web\" \"npm run dev -w @collabdocs/api\" \"npm run dev -w @collabdocs/sync\"",
+    "build": "npm run build --workspaces --if-present",
+    "dev:web": "npm run dev -w @collabdocs/web",
+    "dev:api": "npm run dev -w @collabdocs/api",
+    "dev:sync": "npm run dev -w @collabdocs/sync"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "typescript": "^5.9.3",
+    "tsx": "^4.20.6",
+    "@types/node": "^24.0.0"
+  }
+}
