@@ -13,12 +13,17 @@
     "build": "npm run build --workspaces --if-present",
     "dev:web": "npm run dev -w @collabdocs/web",
     "dev:api": "npm run dev -w @collabdocs/api",
-    "dev:sync": "npm run dev -w @collabdocs/sync"
+    "dev:sync": "npm run dev -w @collabdocs/sync",
+    "db:generate": "npm run db:generate -w @collabdocs/database",
+    "db:validate": "npm run db:validate -w @collabdocs/database",
+    "db:migrate": "npm run db:migrate -w @collabdocs/database",
+    "db:studio": "npm run db:studio -w @collabdocs/database"
   },
   "devDependencies": {
+    "@types/node": "^24.0.0",
     "concurrently": "^9.2.1",
-    "typescript": "^5.9.3",
+    "dotenv-cli": "^11.1.0",
     "tsx": "^4.20.6",
-    "@types/node": "^24.0.0"
+    "typescript": "^5.9.3"
   }
 }

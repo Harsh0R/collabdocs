@@ -1,0 +1,164 @@
+generator client {
+    provider = "prisma-client-js"
+}
+
+datasource db {
+    provider = "postgresql"
+    url      = env("DATABASE_URL")
+}
+
+// ===================================
+// ENUMS
+// ===================================
+
+enum DocumentRole {
+    EDITOR
+    VIEWER
+}
+
+// ===================================
+// USER
+// ===================================
+
+model User {
+    id           String  @id @default(cuid())
+    name         String  @db.VarChar(100)
+    email        String  @unique @db.VarChar(255)
+    passwordHash String
+    avatar       String?
+
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    ownedDocuments Document[]        @relation("DocumentOwner")
+    memberships    DocumentMember[]
+    versions       DocumentVersion[] @relation("VersionCreator")
+    refreshTokens  RefreshToken[]
+
+    @@index([createdAt])
+    @@map("users")
+}
+
+model RefreshToken {
+    id String @id @default(cuid())
+
+    tokenHash String @unique
+    userId    String
+
+    expiresAt DateTime
+    revokedAt DateTime?
+
+    createdAt DateTime @default(now())
+
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@index([userId])
+    @@index([expiresAt])
+    @@map("refresh_tokens")
+}
+
+// ===================================
+// DOCUMENT
+// ===================================
+
+model Document {
+    id    String @id @default(cuid())
+    title String @default("Untitled document") @db.VarChar(200)
+
+    ownerId String
+
+    createdAt DateTime  @default(now())
+    updatedAt DateTime  @updatedAt
+    deletedAt DateTime?
+
+    owner User @relation("DocumentOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+    members  DocumentMember[]
+    state    DocumentState?
+    updates  DocumentUpdate[]
+    versions DocumentVersion[]
+
+    @@index([ownerId, updatedAt])
+    @@index([deletedAt])
+    @@map("documents")
+}
+
+// ===================================
+// DOCUMENT MEMBERS / PERMISSIONS
+// ===================================
+
+model DocumentMember {
+    id String @id @default(cuid())
+
+    documentId String
+    userId     String
+
+    role DocumentRole @default(VIEWER)
+
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+    user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@unique([documentId, userId])
+    @@index([userId])
+    @@map("document_members")
+}
+
+// ===================================
+// CURRENT YJS DOCUMENT STATE
+// ===================================
+
+model DocumentState {
+    id String @id @default(cuid())
+
+    documentId String @unique
+    state      Bytes
+
+    updatedAt DateTime @updatedAt
+
+    document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+    @@map("document_states")
+}
+
+// ===================================
+// INCREMENTAL YJS UPDATES
+// ===================================
+
+model DocumentUpdate {
+    id String @id @default(cuid())
+
+    documentId String
+    update     Bytes
+
+    createdAt DateTime @default(now())
+
+    document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+    @@index([documentId, createdAt])
+    @@map("document_updates")
+}
+
+// ===================================
+// DOCUMENT VERSION HISTORY
+// ===================================
+
+model DocumentVersion {
+    id String @id @default(cuid())
+
+    documentId String
+    title      String @db.VarChar(200)
+
+    state Bytes
+
+    createdById String?
+    createdAt   DateTime @default(now())
+
+    document  Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+    createdBy User?    @relation("VersionCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+    @@index([documentId, createdAt])
+    @@map("document_versions")
+}
