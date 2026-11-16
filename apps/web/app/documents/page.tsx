@@ -6,19 +6,17 @@ import { useRouter } from "next/navigation";
 
 import { apiRequest, ApiError } from "@/lib/api";
 import ShareDocumentModal from "@/components/dashboard/ShareDocumentModal";
+import DocumentSearch from "@/components/dashboard/DocumentSearch";
+
+import DocumentCard, {
+  type DocumentItem,
+} from "@/components/dashboard/DocumentCard";
+
+import CreateDocumentModal from "@/components/dashboard/CreateDocumentModal";
 
 // ===================================
 // TYPES
 // ===================================
-
-interface DocumentItem {
-  id: string;
-  title: string;
-  ownerId: string;
-  role: "OWNER" | "EDITOR" | "VIEWER";
-  updatedAt: string;
-  collaboratorCount: number;
-}
 
 interface DocumentListResponse {
   status: string;
@@ -44,35 +42,6 @@ interface CreateResponse {
 }
 
 const PAGE_SIZE = 9;
-
-// ===================================
-// HELPERS
-// ===================================
-
-function getRoleStyle(role: string) {
-  switch (role) {
-    case "OWNER":
-      return "bg-purple-100 text-purple-700";
-
-    case "EDITOR":
-      return "bg-blue-100 text-blue-700";
-
-    default:
-      return "bg-slate-100 text-slate-600";
-  }
-}
-
-function formatDate(date: string) {
-  return new Date(date).toLocaleDateString(undefined, {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-}
-
-// ===================================
-// DASHBOARD
-// ===================================
 
 export default function DocumentsPage() {
   const router = useRouter();
@@ -285,27 +254,16 @@ export default function DocumentsPage() {
 
         {/* SEARCH */}
 
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-          <div className="relative w-full max-w-md">
-            <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">
-              ⌕
-            </span>
+        {/* SEARCH */}
 
-            <input
-              type="search"
-              value={search}
-              onChange={(event) => {
-                setSearch(event.target.value);
-                setPage(1);
-              }}
-              placeholder="Search documents by title..."
-              className="w-full rounded-xl border border-slate-200 bg-white py-3 pl-11 pr-4 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-            />
-          </div>
-
-          <p className="text-sm text-slate-500">{totalDocuments} document(s)</p>
-        </div>
-
+        <DocumentSearch
+          value={search}
+          totalDocuments={totalDocuments}
+          onChange={(value) => {
+            setSearch(value);
+            setPage(1);
+          }}
+        />
         {/* ERROR */}
 
         {error && (
@@ -348,67 +306,15 @@ export default function DocumentsPage() {
 
           <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {documents.map((document) => (
-              <article
+              <DocumentCard
                 key={document.id}
-                className="group rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-1 hover:border-blue-200 hover:shadow-md"
-              >
-                <div className="mb-5 flex items-center justify-between">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-xl">
-                    📄
-                  </div>
-
-                  <span
-                    className={`rounded-full px-3 py-1 text-xs font-semibold ${getRoleStyle(document.role)}`}
-                  >
-                    {document.role}
-                  </span>
-                </div>
-
-                <button
-                  onClick={() => router.push(`/documents/${document.id}`)}
-                  className="block w-full text-left"
-                >
-                  <h3 className="truncate text-lg font-semibold text-slate-900">
-                    {document.title}
-                  </h3>
-
-                  <p className="mt-2 text-xs text-slate-500">
-                    Last updated {formatDate(document.updatedAt)}
-                  </p>
-
-                  <p className="mt-1 text-xs text-slate-500">
-                    {document.collaboratorCount} collaborator(s)
-                  </p>
-                </button>
-
-                <div className="mt-5 flex items-center gap-2 border-t border-slate-100 pt-4">
-                  <button
-                    onClick={() => router.push(`/documents/${document.id}`)}
-                    className="flex-1 rounded-lg bg-slate-100 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-200"
-                  >
-                    Open
-                  </button>
-
-                  {document.role === "OWNER" && (
-                    <>
-                      <button
-                        onClick={() => openShareModal(document)}
-                        className="rounded-lg bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100"
-                      >
-                        Share
-                      </button>
-
-                      <button
-                        onClick={() => void handleDeleteDocument(document)}
-                        className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-100"
-                        title="Delete document"
-                      >
-                        Delete
-                      </button>
-                    </>
-                  )}
-                </div>
-              </article>
+                document={document}
+                onOpen={(doc) => {
+                  router.push(`/documents/${doc.id}`);
+                }}
+                onShare={openShareModal}
+                onDelete={handleDeleteDocument}
+              />
             ))}
           </div>
         )}
@@ -443,58 +349,14 @@ export default function DocumentsPage() {
       {/* CREATE DOCUMENT MODAL */}
 
       {showCreateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-2xl bg-white p-7 shadow-2xl">
-            <div className="mb-6 flex items-center justify-between">
-              <h3 className="text-xl font-bold text-slate-900">
-                Create document
-              </h3>
-
-              <button
-                onClick={() => setShowCreateModal(false)}
-                className="text-xl text-slate-400 hover:text-slate-700"
-              >
-                ×
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateDocument} className="space-y-5">
-              <div>
-                <label className="mb-2 block text-sm font-medium text-slate-700">
-                  Document title
-                </label>
-
-                <input
-                  autoFocus
-                  required
-                  maxLength={200}
-                  value={newTitle}
-                  onChange={(event) => setNewTitle(event.target.value)}
-                  placeholder="Enter document title"
-                  className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                />
-              </div>
-
-              <div className="flex justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={() => setShowCreateModal(false)}
-                  className="rounded-lg border border-slate-200 px-4 py-2 text-sm"
-                >
-                  Cancel
-                </button>
-
-                <button
-                  type="submit"
-                  disabled={creating || !newTitle.trim()}
-                  className="rounded-lg bg-blue-600 px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
-                >
-                  {creating ? "Creating..." : "Create"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <CreateDocumentModal
+          open={showCreateModal}
+          title={newTitle}
+          creating={creating}
+          onTitleChange={setNewTitle}
+          onSubmit={handleCreateDocument}
+          onClose={() => setShowCreateModal(false)}
+        />
       )}
 
       {/* SHARE MODAL WILL BE CONNECTED IN STEP 3 */}
