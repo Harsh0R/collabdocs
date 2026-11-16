@@ -13,6 +13,7 @@ import StarterKit from "@tiptap/starter-kit";
 import Collaboration from "@tiptap/extension-collaboration";
 
 import CollaborationCaret from "@tiptap/extension-collaboration-caret";
+import Underline from "@tiptap/extension-underline";
 import { error } from "console";
 
 const SYNC_URL = process.env.NEXT_PUBLIC_SYNC_URL || "ws://localhost:1234";
@@ -75,10 +76,10 @@ function EditorSurface({
 
       extensions: [
         StarterKit.configure({
-          // Collaboration has its own
-          // shared undo/redo history.
           undoRedo: false,
         }),
+
+        Underline,
 
         Collaboration.configure({
           document: provider.document,
