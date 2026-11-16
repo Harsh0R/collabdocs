@@ -24,3 +24,131 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* ==================================
+   COLLABDOCS TIPTAP EDITOR
+================================== */
+
+.tiptap {
+    min-height: 580px;
+    outline: none;
+
+    color: #1e293b;
+    font-size: 16px;
+    line-height: 1.8;
+}
+
+/* Paragraphs */
+
+.tiptap p {
+    margin: 12px 0;
+}
+
+/* Headings */
+
+.tiptap h1 {
+    font-size: 32px;
+    font-weight: 700;
+    margin: 24px 0 16px;
+}
+
+.tiptap h2 {
+    font-size: 24px;
+    font-weight: 650;
+    margin: 20px 0 12px;
+}
+
+.tiptap h3 {
+    font-size: 20px;
+    font-weight: 600;
+    margin: 18px 0 10px;
+}
+
+/* Lists */
+
+.tiptap ul {
+    list-style: disc;
+    padding-left: 28px;
+    margin: 16px 0;
+}
+
+.tiptap ol {
+    list-style: decimal;
+    padding-left: 28px;
+    margin: 16px 0;
+}
+
+/* Blockquotes */
+
+.tiptap blockquote {
+    border-left: 4px solid #cbd5e1;
+    padding-left: 16px;
+    color: #64748b;
+    margin: 20px 0;
+}
+
+/* Code */
+
+.tiptap code {
+    background: #f1f5f9;
+    padding: 3px 6px;
+    border-radius: 4px;
+}
+
+/* Collaboration cursors */
+
+.tiptap .collaboration-carets__caret {
+    position: relative;
+
+    border-left: 1px solid currentColor;
+    border-right: 1px solid currentColor;
+
+    margin-left: -1px;
+    margin-right: -1px;
+
+    pointer-events: none;
+    word-break: normal;
+}
+
+/* Cursor labels */
+
+.tiptap .collaboration-carets__label {
+    position: absolute;
+
+    top: -1.35em;
+    left: -1px;
+
+    font-size: 12px;
+    font-weight: 600;
+
+    line-height: 1;
+
+    padding: 3px 6px;
+
+    border-radius: 4px 4px 4px 0;
+
+    color: white;
+
+    white-space: nowrap;
+    user-select: none;
+
+    background: currentColor;
+}
+
+/* Collaborator selection */
+
+.tiptap .collaboration-carets__selection {
+    background-color: currentColor;
+    opacity: 0.25;
+    pointer-events: none;
+}
+
+/* Placeholder-like empty editor appearance */
+
+.tiptap p.is-editor-empty:first-child::before {
+    content: "Start writing your document...";
+    color: #94a3b8;
+    pointer-events: none;
+    float: left;
+    height: 0;
+}
