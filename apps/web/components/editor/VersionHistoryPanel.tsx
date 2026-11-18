@@ -51,6 +51,8 @@ interface VersionDetailResponse {
 interface Props {
   documentId: string;
   onClose: () => void;
+  onRestore: (versionId: string) => Promise<void>;
+  canRestore: boolean;
 }
 
 // ===================================
@@ -59,7 +61,6 @@ interface Props {
 
 function decodeBase64State(state: string): Uint8Array {
   const binary = atob(state);
-
   const bytes = new Uint8Array(binary.length);
 
   for (let i = 0; i < binary.length; i++) {
@@ -140,6 +141,8 @@ function VersionPreview({ state }: { state: string }) {
 export default function VersionHistoryPanel({
   documentId,
   onClose,
+  onRestore,
+  canRestore,
 }: Props) {
   const [versions, setVersions] = useState<DocumentVersion[]>([]);
 
@@ -147,10 +150,14 @@ export default function VersionHistoryPanel({
     useState<VersionDetail | null>(null);
 
   const [loading, setLoading] = useState(true);
-
   const [previewLoading, setPreviewLoading] = useState(false);
 
   const [error, setError] = useState("");
+  const [restoreMessage, setRestoreMessage] = useState("");
+
+  const [restoringVersionId, setRestoringVersionId] = useState<string | null>(
+    null,
+  );
 
   // ===================================
   // LOAD VERSION LIST
@@ -188,6 +195,7 @@ export default function VersionHistoryPanel({
   async function handlePreview(versionId: string) {
     setPreviewLoading(true);
     setError("");
+    setRestoreMessage("");
 
     try {
       const result = await apiRequest<VersionDetailResponse>(
@@ -208,6 +216,58 @@ export default function VersionHistoryPanel({
     }
   }
 
+  // ===================================
+  // RESTORE SELECTED VERSION
+  // ===================================
+
+  async function handleRestore() {
+    if (!selectedVersion || !canRestore || restoringVersionId) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Restore this version? Your current document will first be saved as a backup version.",
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setRestoringVersionId(selectedVersion.id);
+    setError("");
+    setRestoreMessage("");
+
+    try {
+      await onRestore(selectedVersion.id);
+
+      setRestoreMessage(
+        "Version restored successfully. The previous document was saved as a backup.",
+      );
+
+      // Refresh the list so the automatically created backup appears.
+      await loadVersions();
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to restore this version.",
+      );
+    } finally {
+      setRestoringVersionId(null);
+    }
+  }
+
+  const selectedVersionNumber = selectedVersion
+    ? versions.find((version) => version.id === selectedVersion.id)
+        ?.versionNumber
+    : undefined;
+
+  const isRestoring = restoringVersionId !== null;
+
+  // ===================================
+  // UI
+  // ===================================
+
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       {/* BACKDROP */}
@@ -216,7 +276,8 @@ export default function VersionHistoryPanel({
         type="button"
         aria-label="Close version history"
         onClick={onClose}
-        className="absolute inset-0 bg-slate-950/40"
+        disabled={isRestoring}
+        className="absolute inset-0 bg-slate-950/40 disabled:cursor-not-allowed"
       />
 
       {/* PANEL */}
@@ -231,14 +292,15 @@ export default function VersionHistoryPanel({
             </h2>
 
             <p className="mt-1 text-xs text-slate-500">
-              Browse and preview previous document versions.
+              Browse, preview, and restore previous document versions.
             </p>
           </div>
 
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg px-3 py-2 text-xl text-slate-500 hover:bg-slate-100"
+            disabled={isRestoring}
+            className="rounded-lg px-3 py-2 text-xl text-slate-500 hover:bg-slate-100 disabled:opacity-40"
             aria-label="Close"
           >
             ×
@@ -251,6 +313,15 @@ export default function VersionHistoryPanel({
           {error && (
             <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
               {error}
+            </div>
+          )}
+
+          {restoreMessage && (
+            <div
+              role="status"
+              className="mb-4 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700"
+            >
+              {restoreMessage}
             </div>
           )}
 
@@ -281,8 +352,7 @@ export default function VersionHistoryPanel({
               </div>
 
               {versions.map((version) => {
-                const isSelected =
-                  selectedVersion?.id === version.id;
+                const isSelected = selectedVersion?.id === version.id;
 
                 return (
                   <div
@@ -311,12 +381,10 @@ export default function VersionHistoryPanel({
                       <button
                         type="button"
                         onClick={() => handlePreview(version.id)}
-                        disabled={previewLoading}
+                        disabled={previewLoading || isRestoring}
                         className="shrink-0 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                       >
-                        {isSelected
-                          ? "Selected"
-                          : "Preview"}
+                        {isSelected ? "Selected" : "Preview"}
                       </button>
                     </div>
                   </div>
@@ -338,14 +406,12 @@ export default function VersionHistoryPanel({
               <div className="space-y-4">
                 <div>
                   <h3 className="font-semibold text-slate-900">
-                    Version {versions.find(
-                      (version) => version.id === selectedVersion.id,
-                    )?.versionNumber ?? ""}
-                    {" "}Preview
+                    Version {selectedVersionNumber ?? ""} Preview
                   </h3>
 
                   <p className="mt-1 text-xs text-slate-500">
-                    Saved by {selectedVersion.createdBy?.name || "Unknown user"}
+                    Saved by{" "}
+                    {selectedVersion.createdBy?.name || "Unknown user"}
                   </p>
                 </div>
 
@@ -353,6 +419,25 @@ export default function VersionHistoryPanel({
                   key={selectedVersion.id}
                   state={selectedVersion.state}
                 />
+
+                {canRestore && (
+                  <button
+                    type="button"
+                    onClick={handleRestore}
+                    disabled={isRestoring || loading}
+                    className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {restoringVersionId === selectedVersion.id
+                      ? "Restoring version..."
+                      : "Restore this version"}
+                  </button>
+                )}
+
+                {!canRestore && (
+                  <p className="rounded-lg bg-amber-50 p-3 text-center text-xs text-amber-800">
+                    You have view-only access. Restoring versions is disabled.
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -364,7 +449,8 @@ export default function VersionHistoryPanel({
           <button
             type="button"
             onClick={onClose}
-            className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            disabled={isRestoring}
+            className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
           >
             Close History
           </button>

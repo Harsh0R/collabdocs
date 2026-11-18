@@ -312,6 +312,8 @@ export default function DocumentPage() {
           user={user}
           title={document.title}
           readOnly={document.role === "VIEWER"}
+          showVersionHistory={showVersionHistory}
+          onCloseVersionHistory={() => setShowVersionHistory(false)}
         />
       </div>
 
@@ -327,12 +329,12 @@ export default function DocumentPage() {
 
       {/* VERSION HISTORY */}
 
-      {showVersionHistory && (
+      {/* {showVersionHistory && (
         <VersionHistoryPanel
           documentId={document.id}
           onClose={() => setShowVersionHistory(false)}
         />
-      )}
+      )} */}
     </main>
   );
 }

@@ -1,6 +1,5 @@
 // apps/sync/src/server.ts
 
-
 import "./config/env.js";
 
 import { Server } from "@hocuspocus/server";
@@ -27,38 +26,39 @@ async function persistDocumentState(
   documentName: string,
   document: Y.Doc,
 ): Promise<void> {
-  const previous =
-    persistenceQueues.get(documentName) ?? Promise.resolve();
+  const previous = persistenceQueues.get(documentName) ?? Promise.resolve();
 
-  const current = previous.catch(() => undefined).then(async () => {
-    const state = Buffer.from(Y.encodeStateAsUpdate(document));
+  const current = previous
+    .catch(() => undefined)
+    .then(async () => {
+      const state = Buffer.from(Y.encodeStateAsUpdate(document));
 
-    await prisma.documentState.upsert({
-      where: {
-        documentId: documentName,
-      },
+      await prisma.documentState.upsert({
+        where: {
+          documentId: documentName,
+        },
 
-      create: {
-        documentId: documentName,
-        state,
-      },
+        create: {
+          documentId: documentName,
+          state,
+        },
 
-      update: {
-        state,
-      },
+        update: {
+          state,
+        },
+      });
+
+      await prisma.document.updateMany({
+        where: {
+          id: documentName,
+          deletedAt: null,
+        },
+
+        data: {
+          updatedAt: new Date(),
+        },
+      });
     });
-
-    await prisma.document.updateMany({
-      where: {
-        id: documentName,
-        deletedAt: null,
-      },
-
-      data: {
-        updatedAt: new Date(),
-      },
-    });
-  });
 
   persistenceQueues.set(documentName, current);
 
@@ -69,6 +69,42 @@ async function persistDocumentState(
       persistenceQueues.delete(documentName);
     }
   }
+}
+
+// ===================================
+// CLONE TIPTAP YJS XML NODES
+// ===================================
+
+function cloneXmlNode(
+  node: Y.XmlElement | Y.XmlText | Y.XmlHook,
+): Y.XmlElement | Y.XmlText {
+  if (node instanceof Y.XmlText) {
+    const clonedText = new Y.XmlText();
+
+    clonedText.applyDelta(node.toDelta());
+
+    return clonedText;
+  }
+
+  if (node instanceof Y.XmlElement) {
+    const clonedElement = new Y.XmlElement(node.nodeName);
+
+    for (const [key, value] of Object.entries(node.getAttributes())) {
+      if (value !== undefined) {
+        clonedElement.setAttribute(key, value);
+      }
+    }
+
+    const clonedChildren = node.toArray().map((child) => cloneXmlNode(child));
+
+    if (clonedChildren.length > 0) {
+      clonedElement.insert(0, clonedChildren);
+    }
+
+    return clonedElement;
+  }
+
+  throw new Error("Unsupported Yjs XML node type");
 }
 
 const server = new Server({
@@ -160,9 +196,7 @@ const server = new Server({
     }
 
     const role =
-      document.ownerId === user.id
-        ? "OWNER"
-        : document.members[0]?.role;
+      document.ownerId === user.id ? "OWNER" : document.members[0]?.role;
 
     if (!role) {
       throw new Error("Document access denied");
@@ -171,9 +205,7 @@ const server = new Server({
     // Viewers can receive updates but cannot edit.
     connectionConfig.readOnly = role === "VIEWER";
 
-    console.log(
-      `[AUTH] ${user.name} connected | ${documentName} | ${role}`,
-    );
+    console.log(`[AUTH] ${user.name} connected | ${documentName} | ${role}`);
 
     if (typeof payload.exp !== "number") {
       throw new Error("Invalid token: expiration missing");
@@ -196,10 +228,7 @@ const server = new Server({
   // ===================================
 
   async beforeHandleMessage({ context }) {
-    if (
-      context?.tokenExpiresAt &&
-      Date.now() >= context.tokenExpiresAt
-    ) {
+    if (context?.tokenExpiresAt && Date.now() >= context.tokenExpiresAt) {
       throw new Error("Access token expired");
     }
   },
@@ -259,40 +288,42 @@ const server = new Server({
   // MANUAL SAVE VERSION REQUEST
   // ===================================
 
-  async onStateless({
-    payload,
-    document,
-    documentName,
-    connection,
-  }) {
+  // ===================================
+  // SAVE + RESTORE VERSION REQUESTS
+  // ===================================
+
+  async onStateless({ payload, document, documentName, connection }) {
     let message: {
       type?: unknown;
       requestId?: unknown;
+      versionId?: unknown;
     };
 
     try {
       message = JSON.parse(payload);
     } catch {
-      // Ignore unrelated or invalid stateless messages.
       return;
     }
 
-    if (message?.type !== "collabdocs:save-version") {
+    const isSaveRequest = message.type === "collabdocs:save-version";
+
+    const isRestoreRequest = message.type === "collabdocs:restore-version";
+
+    if (!isSaveRequest && !isRestoreRequest) {
       return;
     }
 
     const requestId =
-      typeof message.requestId === "string"
-        ? message.requestId
-        : "";
+      typeof message.requestId === "string" ? message.requestId : "";
 
-    const sendAcknowledgement = (
-      ok: boolean,
-      error?: string,
-    ) => {
+    const acknowledgementType = isSaveRequest
+      ? "collabdocs:save-version:ack"
+      : "collabdocs:restore-version:ack";
+
+    const sendAcknowledgement = (ok: boolean, error?: string) => {
       connection.sendStateless(
         JSON.stringify({
-          type: "collabdocs:save-version:ack",
+          type: acknowledgementType,
           requestId,
           ok,
           error,
@@ -305,63 +336,130 @@ const server = new Server({
       return;
     }
 
+    // ===================================
+    // VERIFY CONNECTION PERMISSIONS
+    // ===================================
+
     const context = connection.context as {
       documentId?: string;
       role?: string;
       tokenExpiresAt?: number;
     };
 
-    // Verify that this connection belongs to this document.
     if (context?.documentId !== documentName) {
       sendAcknowledgement(false, "Document access denied");
       return;
     }
 
-    // Do not allow expired sessions to save versions.
-    if (
-      !context?.tokenExpiresAt ||
-      Date.now() >= context.tokenExpiresAt
-    ) {
+    if (!context?.tokenExpiresAt || Date.now() >= context.tokenExpiresAt) {
       sendAcknowledgement(false, "Access token expired");
       return;
     }
 
-    // Only owners and editors can save versions.
-    if (
-      context.role !== "OWNER" &&
-      context.role !== "EDITOR"
-    ) {
+    if (context.role !== "OWNER" && context.role !== "EDITOR") {
       sendAcknowledgement(
         false,
-        "You do not have permission to save versions",
+        "You do not have permission to modify document versions",
       );
       return;
     }
 
     try {
+      // ===================================
+      // SAVE CURRENT DOCUMENT STATE
+      // ===================================
+
+      if (isSaveRequest) {
+        console.log(`[VERSION SAVE] Request received | ${documentName}`);
+
+        await persistDocumentState(documentName, document);
+
+        console.log(`[VERSION SAVE] State persisted | ${documentName}`);
+
+        sendAcknowledgement(true);
+
+        return;
+      }
+
+      // ===================================
+      // RESTORE HISTORICAL VERSION
+      // ===================================
+
+      if (typeof message.versionId !== "string") {
+        sendAcknowledgement(false, "Missing version ID");
+        return;
+      }
+
       console.log(
-        `[VERSION SAVE] Request received | ${documentName}`,
+        `[VERSION RESTORE] Request received | ${documentName} | ${message.versionId}`,
       );
 
-      // Persist the latest in-memory Yjs document.
+      // Find the requested version belonging to this document.
+      const version = await prisma.documentVersion.findFirst({
+        where: {
+          id: message.versionId,
+          documentId: documentName,
+        },
+
+        select: {
+          id: true,
+          state: true,
+        },
+      });
+
+      if (!version) {
+        sendAcknowledgement(false, "Document version not found");
+        return;
+      }
+
+      // Decode the historical Yjs snapshot in an isolated document.
+      const snapshotDoc = new Y.Doc();
+
+      let restoredNodes: Array<Y.XmlElement | Y.XmlText>;
+
+      try {
+        Y.applyUpdate(snapshotDoc, new Uint8Array(version.state));
+
+        const snapshotFragment = snapshotDoc.getXmlFragment("default");
+
+        // Clone the snapshot's nodes into independent Yjs types.
+        restoredNodes = snapshotFragment
+          .toArray()
+          .map((node) => cloneXmlNode(node));
+      } finally {
+        snapshotDoc.destroy();
+      }
+
+      // Get the live Tiptap collaboration fragment.
+      const liveFragment = document.getXmlFragment("default");
+
+      // Replace the existing content in one Yjs transaction.
+      document.transact(() => {
+        if (liveFragment.length > 0) {
+          liveFragment.delete(0, liveFragment.length);
+        }
+
+        if (restoredNodes.length > 0) {
+          liveFragment.insert(0, restoredNodes);
+        }
+      }, "collabdocs:restore-version");
+
+      // Persist the restored live document.
       await persistDocumentState(documentName, document);
 
       console.log(
-        `[VERSION SAVE] State persisted | ${documentName}`,
+        `[VERSION RESTORE] Successfully restored ${version.id} | ${documentName}`,
       );
 
-      // Acknowledge only the requesting connection.
       sendAcknowledgement(true);
-
     } catch (error) {
-      console.error(
-        `[VERSION SAVE] Failed | ${documentName}`,
-        error,
-      );
+      console.error(`[VERSION OPERATION] Failed | ${documentName}`, error);
 
       sendAcknowledgement(
         false,
-        "Could not persist document state",
+        isRestoreRequest
+          ? "Could not restore document version"
+          : "Could not persist document state",
       );
     }
   },
