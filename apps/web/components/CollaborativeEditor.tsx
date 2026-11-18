@@ -1,6 +1,9 @@
+// apps/web/src/components/CollaborativeEditor.tsx
+
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { apiRequest } from "@/lib/api";
 
 import * as Y from "yjs";
 
@@ -14,7 +17,6 @@ import Collaboration from "@tiptap/extension-collaboration";
 
 import CollaborationCaret from "@tiptap/extension-collaboration-caret";
 import Underline from "@tiptap/extension-underline";
-import { error } from "console";
 
 const SYNC_URL = process.env.NEXT_PUBLIC_SYNC_URL || "ws://localhost:1234";
 
@@ -35,6 +37,12 @@ interface Props {
 interface PresenceUser {
   name: string;
   color: string;
+}
+
+interface PendingSaveRequest {
+  resolve: () => void;
+  reject: (error: Error) => void;
+  timeoutId: ReturnType<typeof setTimeout>;
 }
 
 const USER_COLORS = [
@@ -208,6 +216,20 @@ function EditorSurface({
   );
 }
 
+async function waitForPendingUpdates(
+  provider: HocuspocusProvider,
+): Promise<void> {
+  const deadline = Date.now() + 15000;
+
+  while (provider.hasUnsyncedChanges) {
+    if (Date.now() >= deadline) {
+      throw new Error("Timed out waiting for document synchronization.");
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
 // ===================================
 // MAIN COLLABORATIVE EDITOR
 // ===================================
@@ -231,6 +253,14 @@ export default function CollaborativeEditor({
 
   const [connectionError, setConnectionError] = useState("");
 
+  const pendingSaveRequests = useRef(new Map<string, PendingSaveRequest>());
+
+  const [isSavingVersion, setIsSavingVersion] = useState(false);
+
+  const [saveMessage, setSaveMessage] = useState("");
+
+  const [saveError, setSaveError] = useState(false);
+
   // Create WebSocket connection.
 
   useEffect(() => {
@@ -249,6 +279,37 @@ export default function CollaborativeEditor({
 
       onSynced: ({ state }) => {
         setIsSynced(state);
+      },
+
+      // Receive server responses for manual version saving.
+      onStateless: ({ payload }) => {
+        try {
+          const message = JSON.parse(payload);
+
+          if (message.type !== "collabdocs:save-version:ack") {
+            return;
+          }
+
+          const pending = pendingSaveRequests.current.get(message.requestId);
+
+          if (!pending) {
+            return;
+          }
+
+          clearTimeout(pending.timeoutId);
+
+          pendingSaveRequests.current.delete(message.requestId);
+
+          if (message.ok === true) {
+            pending.resolve();
+          } else {
+            pending.reject(
+              new Error(message.error || "Document persistence failed."),
+            );
+          }
+        } catch (error) {
+          console.error("Invalid save acknowledgement:", error);
+        }
       },
     });
 
@@ -284,11 +345,117 @@ export default function CollaborativeEditor({
     return () => {
       awareness.off("change", updatePresence);
 
+      pendingSaveRequests.current.forEach((pending) => {
+        clearTimeout(pending.timeoutId);
+
+        pending.reject(new Error("Editor connection closed during save."));
+      });
+
+      pendingSaveRequests.current.clear();
+
       newProvider.destroy();
 
       ydoc.destroy();
     };
   }, [documentId, accessToken, ydoc]);
+
+  async function handleSaveVersion() {
+    if (readOnly || isSavingVersion) {
+      return;
+    }
+
+    if (connectionStatus !== "connected" || !isSynced) {
+      setSaveError(true);
+      setSaveMessage(
+        "Please wait until the document is connected and synchronized.",
+      );
+      return;
+    }
+
+    setIsSavingVersion(true);
+    setSaveMessage("");
+    setSaveError(false);
+
+    try {
+      // 1. Wait until pending Yjs updates are acknowledged.
+      await waitForPendingUpdates(provider!);
+
+      if (connectionStatus !== "connected") {
+        throw new Error("Connection lost. Please reconnect and try again.");
+      }
+
+      // 2. Generate a unique request ID.
+      const requestId = crypto.randomUUID();
+
+      // 3. Prepare the acknowledgement promise.
+      const acknowledgement = new Promise<void>((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+          pendingSaveRequests.current.delete(requestId);
+
+          reject(
+            new Error("Sync server did not acknowledge the save request."),
+          );
+        }, 15000);
+
+        pendingSaveRequests.current.set(requestId, {
+          resolve,
+          reject,
+          timeoutId,
+        });
+      });
+
+      // 4. Ask the sync server to persist its current Yjs document.
+      try {
+        provider!.sendStateless(
+          JSON.stringify({
+            type: "collabdocs:save-version",
+            requestId,
+          }),
+        );
+      } catch (error) {
+        const pending = pendingSaveRequests.current.get(requestId);
+
+        if (pending) {
+          clearTimeout(pending.timeoutId);
+          pendingSaveRequests.current.delete(requestId);
+        }
+
+        throw error;
+      }
+
+      // 5. Wait for the server's persistence acknowledgement.
+      await acknowledgement;
+
+      // 6. Create a version only after persistence succeeds.
+      const result = await apiRequest<{
+        status: string;
+        message?: string;
+        data?: {
+          version?: {
+            id: string;
+          };
+        };
+      }>(`/api/documents/${documentId}/versions`, {
+        method: "POST",
+      });
+
+      // 7. Show success.
+      setSaveError(false);
+      setSaveMessage(result.message || "Document version saved successfully.");
+    } catch (error) {
+      console.error("Save version failed:", error);
+
+      setSaveError(true);
+
+      setSaveMessage(
+        error instanceof Error
+          ? error.message
+          : "Failed to save document version.",
+      );
+    } finally {
+      setIsSavingVersion(false);
+    }
+  }
 
   if (connectionError) {
     return (
@@ -309,6 +476,19 @@ export default function CollaborativeEditor({
   return (
     <div className="space-y-5">
       {/* COLLABORATION HEADER */}
+      {saveMessage && (
+        <div
+          role="status"
+          aria-live="polite"
+          className={`rounded-lg border p-3 text-sm ${
+            saveError
+              ? "border-red-200 bg-red-50 text-red-700"
+              : "border-green-200 bg-green-50 text-green-700"
+          }`}
+        >
+          {saveMessage}
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
@@ -350,6 +530,18 @@ export default function CollaborativeEditor({
             <div className="rounded-full bg-amber-100 px-3 py-2 text-xs font-medium text-amber-800">
               View only
             </div>
+          )}
+          {!readOnly && (
+            <button
+              type="button"
+              onClick={handleSaveVersion}
+              disabled={
+                isSavingVersion || connectionStatus !== "connected" || !isSynced
+              }
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isSavingVersion ? "Saving Version..." : "Save Version"}
+            </button>
           )}
         </div>
       </div>

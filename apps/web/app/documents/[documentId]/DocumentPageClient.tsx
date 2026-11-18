@@ -1,3 +1,5 @@
+// apps/web/src/app/documents/[documentId]/DocumentPageClient.tsx
+
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
@@ -8,6 +10,7 @@ import ShareDocumentModal from "@/components/dashboard/ShareDocumentModal";
 
 import { apiRequest } from "@/lib/api";
 import CollaborativeEditor from "@/components/CollaborativeEditor";
+import VersionHistoryPanel from "@/components/editor/VersionHistoryPanel";
 
 interface User {
   id: string;
@@ -54,6 +57,7 @@ export default function DocumentPage() {
 
   const [error, setError] = useState("");
 
+  const [showVersionHistory, setShowVersionHistory] = useState(false);
   // ===================================
   // LOAD DOCUMENT
   // ===================================
@@ -275,6 +279,13 @@ export default function DocumentPage() {
                 Share
               </button>
             )}
+            <button
+              type="button"
+              onClick={() => setShowVersionHistory(true)}
+              className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+            >
+              Version History
+            </button>
 
             <button
               onClick={handleLogout}
@@ -311,6 +322,15 @@ export default function DocumentPage() {
           documentId={document.id}
           documentTitle={document.title}
           onClose={() => setShowShare(false)}
+        />
+      )}
+
+      {/* VERSION HISTORY */}
+
+      {showVersionHistory && (
+        <VersionHistoryPanel
+          documentId={document.id}
+          onClose={() => setShowVersionHistory(false)}
         />
       )}
     </main>

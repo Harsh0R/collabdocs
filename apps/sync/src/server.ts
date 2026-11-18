@@ -1,3 +1,6 @@
+// apps/sync/src/server.ts
+
+
 import "./config/env.js";
 
 import { Server } from "@hocuspocus/server";
@@ -11,17 +14,77 @@ const PORT = Number(process.env.SYNC_PORT) || 1234;
 
 const redisUrl = new URL(process.env.REDIS_URL || "redis://localhost:6379");
 
+// ===================================
+// DOCUMENT PERSISTENCE QUEUE
+// ===================================
+
+// Prevent overlapping persistence operations for the same document
+// within this sync-server process.
+
+const persistenceQueues = new Map<string, Promise<void>>();
+
+async function persistDocumentState(
+  documentName: string,
+  document: Y.Doc,
+): Promise<void> {
+  const previous =
+    persistenceQueues.get(documentName) ?? Promise.resolve();
+
+  const current = previous.catch(() => undefined).then(async () => {
+    const state = Buffer.from(Y.encodeStateAsUpdate(document));
+
+    await prisma.documentState.upsert({
+      where: {
+        documentId: documentName,
+      },
+
+      create: {
+        documentId: documentName,
+        state,
+      },
+
+      update: {
+        state,
+      },
+    });
+
+    await prisma.document.updateMany({
+      where: {
+        id: documentName,
+        deletedAt: null,
+      },
+
+      data: {
+        updatedAt: new Date(),
+      },
+    });
+  });
+
+  persistenceQueues.set(documentName, current);
+
+  try {
+    await current;
+  } finally {
+    if (persistenceQueues.get(documentName) === current) {
+      persistenceQueues.delete(documentName);
+    }
+  }
+}
+
 const server = new Server({
   port: PORT,
 
   name: "collabdocs-sync",
 
-  // Redis supports communication between
-  // multiple Hocuspocus server instances.
+  // ===================================
+  // REDIS
+  // ===================================
+
   extensions: [
     new Redis({
       host: redisUrl.hostname,
       port: Number(redisUrl.port || 6379),
+
       options: {
         password: redisUrl.password
           ? decodeURIComponent(redisUrl.password)
@@ -56,9 +119,6 @@ const server = new Server({
     if (!user) {
       throw new Error("User not found");
     }
-
-    // Document name must be the actual
-    // document ID from PostgreSQL.
 
     const document = await prisma.document.findFirst({
       where: {
@@ -100,18 +160,20 @@ const server = new Server({
     }
 
     const role =
-      document.ownerId === user.id ? "OWNER" : document.members[0]?.role;
+      document.ownerId === user.id
+        ? "OWNER"
+        : document.members[0]?.role;
 
     if (!role) {
       throw new Error("Document access denied");
     }
 
-    // Viewers can connect and receive updates,
-    // but cannot submit document changes.
-
+    // Viewers can receive updates but cannot edit.
     connectionConfig.readOnly = role === "VIEWER";
 
-    console.log(`[AUTH] ${user.name} connected | ${documentName} | ${role}`);
+    console.log(
+      `[AUTH] ${user.name} connected | ${documentName} | ${role}`,
+    );
 
     if (typeof payload.exp !== "number") {
       throw new Error("Invalid token: expiration missing");
@@ -120,7 +182,7 @@ const server = new Server({
     if (Date.now() >= payload.exp * 1000) {
       throw new Error("Access token expired");
     }
-    // Context becomes available in subsequent hooks.
+
     return {
       user,
       documentId: document.id,
@@ -134,7 +196,10 @@ const server = new Server({
   // ===================================
 
   async beforeHandleMessage({ context }) {
-    if (context?.tokenExpiresAt && Date.now() >= context.tokenExpiresAt) {
+    if (
+      context?.tokenExpiresAt &&
+      Date.now() >= context.tokenExpiresAt
+    ) {
       throw new Error("Access token expired");
     }
   },
@@ -167,9 +232,6 @@ const server = new Server({
       },
     });
 
-    // Create an empty Yjs document if no
-    // previous collaborative state exists.
-
     const ydoc = new Y.Doc();
 
     if (storedState) {
@@ -182,42 +244,126 @@ const server = new Server({
   },
 
   // ===================================
-  // PERSIST DOCUMENT TO POSTGRESQL
+  // AUTOMATIC DOCUMENT PERSISTENCE
   // ===================================
 
   async onStoreDocument({ documentName, document }) {
     console.log(`[SAVE] Persisting document ${documentName}`);
 
-    const state = Buffer.from(Y.encodeStateAsUpdate(document));
-
-    await prisma.documentState.upsert({
-      where: {
-        documentId: documentName,
-      },
-
-      create: {
-        documentId: documentName,
-        state,
-      },
-
-      update: {
-        state,
-      },
-    });
-
-    // Update document activity timestamp.
-    await prisma.document.updateMany({
-      where: {
-        id: documentName,
-        deletedAt: null,
-      },
-
-      data: {
-        updatedAt: new Date(),
-      },
-    });
+    await persistDocumentState(documentName, document);
 
     console.log(`[SAVE] Successfully persisted ${documentName}`);
+  },
+
+  // ===================================
+  // MANUAL SAVE VERSION REQUEST
+  // ===================================
+
+  async onStateless({
+    payload,
+    document,
+    documentName,
+    connection,
+  }) {
+    let message: {
+      type?: unknown;
+      requestId?: unknown;
+    };
+
+    try {
+      message = JSON.parse(payload);
+    } catch {
+      // Ignore unrelated or invalid stateless messages.
+      return;
+    }
+
+    if (message?.type !== "collabdocs:save-version") {
+      return;
+    }
+
+    const requestId =
+      typeof message.requestId === "string"
+        ? message.requestId
+        : "";
+
+    const sendAcknowledgement = (
+      ok: boolean,
+      error?: string,
+    ) => {
+      connection.sendStateless(
+        JSON.stringify({
+          type: "collabdocs:save-version:ack",
+          requestId,
+          ok,
+          error,
+        }),
+      );
+    };
+
+    if (!requestId) {
+      sendAcknowledgement(false, "Missing request ID");
+      return;
+    }
+
+    const context = connection.context as {
+      documentId?: string;
+      role?: string;
+      tokenExpiresAt?: number;
+    };
+
+    // Verify that this connection belongs to this document.
+    if (context?.documentId !== documentName) {
+      sendAcknowledgement(false, "Document access denied");
+      return;
+    }
+
+    // Do not allow expired sessions to save versions.
+    if (
+      !context?.tokenExpiresAt ||
+      Date.now() >= context.tokenExpiresAt
+    ) {
+      sendAcknowledgement(false, "Access token expired");
+      return;
+    }
+
+    // Only owners and editors can save versions.
+    if (
+      context.role !== "OWNER" &&
+      context.role !== "EDITOR"
+    ) {
+      sendAcknowledgement(
+        false,
+        "You do not have permission to save versions",
+      );
+      return;
+    }
+
+    try {
+      console.log(
+        `[VERSION SAVE] Request received | ${documentName}`,
+      );
+
+      // Persist the latest in-memory Yjs document.
+      await persistDocumentState(documentName, document);
+
+      console.log(
+        `[VERSION SAVE] State persisted | ${documentName}`,
+      );
+
+      // Acknowledge only the requesting connection.
+      sendAcknowledgement(true);
+
+    } catch (error) {
+      console.error(
+        `[VERSION SAVE] Failed | ${documentName}`,
+        error,
+      );
+
+      sendAcknowledgement(
+        false,
+        "Could not persist document state",
+      );
+    }
   },
 
   // ===================================
