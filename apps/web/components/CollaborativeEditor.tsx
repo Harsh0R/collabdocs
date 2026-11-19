@@ -263,6 +263,14 @@ export default function CollaborativeEditor({
   const [saveMessage, setSaveMessage] = useState("");
   const [saveError, setSaveError] = useState(false);
 
+  type RestoreStatus = {
+    status: "started" | "completed" | "failed";
+    userName?: string;
+  };
+
+  const [remoteRestoreStatus, setRemoteRestoreStatus] =
+    useState<RestoreStatus | null>(null);
+
   // ===================================
   // CREATE HOCUSPOCUS CONNECTION
   // ===================================
@@ -287,6 +295,23 @@ export default function CollaborativeEditor({
         try {
           const message = JSON.parse(payload);
 
+          // Handle restore-status broadcasts first.
+          if (message.type === "collabdocs:restore-status") {
+            if (
+              message.status === "started" ||
+              message.status === "completed" ||
+              message.status === "failed"
+            ) {
+              setRemoteRestoreStatus({
+                status: message.status,
+                userName: message.userName,
+              });
+            }
+
+            return;
+          }
+
+          // Handle normal save/restore acknowledgements.
           const pending = pendingRequests.current.get(message.requestId);
 
           if (!pending || message.type !== pending.expectedAckType) {
@@ -304,7 +329,7 @@ export default function CollaborativeEditor({
             );
           }
         } catch (error) {
-          console.error("Invalid sync acknowledgement:", error);
+          console.error("Invalid sync message:", error);
         }
       },
     });
@@ -352,6 +377,18 @@ export default function CollaborativeEditor({
       ydoc.destroy();
     };
   }, [documentId, accessToken, ydoc]);
+
+  useEffect(() => {
+    if (!remoteRestoreStatus || remoteRestoreStatus.status === "started") {
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      setRemoteRestoreStatus(null);
+    }, 4000);
+
+    return () => clearTimeout(timeout);
+  }, [remoteRestoreStatus]);
 
   // ===================================
   // SEND REQUEST AND WAIT FOR ACK
@@ -558,6 +595,37 @@ export default function CollaborativeEditor({
 
   return (
     <div className="space-y-5">
+      {remoteRestoreStatus?.status === "started" && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800"
+        >
+          <strong>Document temporarily locked.</strong>{" "}
+          {remoteRestoreStatus.userName
+            ? `${remoteRestoreStatus.userName} is restoring this document.`
+            : "Another collaborator is restoring this document."}
+          Editing is temporarily disabled.
+        </div>
+      )}
+
+      {remoteRestoreStatus?.status === "completed" && (
+        <div
+          role="status"
+          className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700"
+        >
+          Document restoration completed. You can continue editing.
+        </div>
+      )}
+
+      {remoteRestoreStatus?.status === "failed" && (
+        <div
+          role="alert"
+          className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+        >
+          Document restoration failed. Editing has been re-enabled.
+        </div>
+      )}
       {saveMessage && (
         <div
           role="status"
@@ -667,7 +735,7 @@ export default function CollaborativeEditor({
         provider={provider}
         user={user}
         readOnly={readOnly}
-        isRestoring={isRestoring}
+        isRestoring={isRestoring || remoteRestoreStatus?.status === "started"}
       />
 
       {/* VERSION HISTORY */}

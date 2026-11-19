@@ -8,7 +8,10 @@ import * as Y from "yjs";
 
 import { prisma } from "./config/prisma.js";
 import { verifySyncToken } from "./utils/auth.js";
-import { assertDocumentLockOwnership, withDocumentLock } from "./utils/redis-lock.js";
+import {
+  assertDocumentLockOwnership,
+  withDocumentLock,
+} from "./utils/redis-lock.js";
 
 const PORT = Number(process.env.SYNC_PORT) || 1234;
 
@@ -106,6 +109,46 @@ function cloneXmlNode(
   }
 
   throw new Error("Unsupported Yjs XML node type");
+}
+
+// ===================================
+// DOCUMENT RESTORE MODE
+// ===================================
+
+interface RestoreAwareDocument {
+  getConnections(): Array<{
+    context?: {
+      role?: string;
+    };
+    readOnly: boolean;
+  }>;
+
+  broadcastStateless(payload: string): void;
+}
+
+function setDocumentRestoreMode(
+  document: RestoreAwareDocument,
+  restoring: boolean,
+): void {
+  for (const connection of document.getConnections()) {
+    // Preserve VIEWER permissions after restoration.
+    connection.readOnly = restoring || connection.context?.role === "VIEWER";
+  }
+}
+
+function broadcastRestoreStatus(
+  document: RestoreAwareDocument,
+  status: "started" | "completed" | "failed",
+  userName?: string,
+): void {
+  document.broadcastStateless(
+    JSON.stringify({
+      type: "collabdocs:restore-status",
+      status,
+      userName,
+      timestamp: Date.now(),
+    }),
+  );
 }
 
 const server = new Server({
@@ -345,6 +388,9 @@ const server = new Server({
       documentId?: string;
       role?: string;
       tokenExpiresAt?: number;
+      user?: {
+        name?: string;
+      };
     };
 
     if (context?.documentId !== documentName) {
@@ -386,10 +432,6 @@ const server = new Server({
       // RESTORE HISTORICAL VERSION
       // ===================================
 
-      // ===================================
-      // RESTORE HISTORICAL VERSION
-      // ===================================
-
       if (typeof message.versionId !== "string") {
         sendAcknowledgement(false, "Missing version ID");
         return;
@@ -399,79 +441,99 @@ const server = new Server({
         `[VERSION RESTORE] Request received | ${documentName} | ${message.versionId}`,
       );
 
-      await withDocumentLock(documentName, async (lock) => {
-        // 1. Verify lock ownership before starting.
-        await assertDocumentLockOwnership(lock);
+      let restoreStarted = false;
 
-        // 2. Find the requested version belonging to this document.
-        const version = await prisma.documentVersion.findFirst({
-          where: {
-            id: message.versionId as string,
-            documentId: documentName,
-          },
-          select: {
-            id: true,
-            state: true,
-          },
+      try {
+        // The Redis lock is acquired before changing any connection permissions.
+        await withDocumentLock(documentName, async (lock) => {
+          await assertDocumentLockOwnership(lock);
+
+          // Temporarily disable editing for all connected collaborators
+          // on this Hocuspocus server instance.
+          setDocumentRestoreMode(document, true);
+          restoreStarted = true;
+
+          broadcastRestoreStatus(document, "started", context.user?.name);
+
+          await assertDocumentLockOwnership(lock);
+
+          const version = await prisma.documentVersion.findFirst({
+            where: {
+              id: message.versionId as string,
+              documentId: documentName,
+            },
+            select: {
+              id: true,
+              state: true,
+            },
+          });
+
+          if (!version) {
+            throw new Error("Document version not found");
+          }
+
+          await assertDocumentLockOwnership(lock);
+
+          // Load the historical Yjs state into an isolated document.
+          const snapshotDoc = new Y.Doc();
+
+          let restoredNodes: Array<Y.XmlElement | Y.XmlText>;
+
+          try {
+            Y.applyUpdate(snapshotDoc, new Uint8Array(version.state));
+
+            const snapshotFragment = snapshotDoc.getXmlFragment("default");
+
+            restoredNodes = snapshotFragment
+              .toArray()
+              .map((node) => cloneXmlNode(node));
+          } finally {
+            snapshotDoc.destroy();
+          }
+
+          await assertDocumentLockOwnership(lock);
+
+          // Replace the live document content atomically.
+          const liveFragment = document.getXmlFragment("default");
+
+          document.transact(() => {
+            if (liveFragment.length > 0) {
+              liveFragment.delete(0, liveFragment.length);
+            }
+
+            if (restoredNodes.length > 0) {
+              liveFragment.insert(0, restoredNodes);
+            }
+          }, "collabdocs:restore-version");
+
+          await assertDocumentLockOwnership(lock);
+
+          // Persist the restored state before reporting success.
+          await persistDocumentState(documentName, document);
+
+          await assertDocumentLockOwnership(lock);
+
+          console.log(
+            `[VERSION RESTORE] Successfully restored ${version.id} | ${documentName}`,
+          );
         });
 
-        if (!version) {
-          throw new Error("Document version not found");
+        // withDocumentLock has now released the Redis lock.
+        setDocumentRestoreMode(document, false);
+
+        broadcastRestoreStatus(document, "completed");
+
+        sendAcknowledgement(true);
+      } catch (error) {
+        // The lock has been released by withDocumentLock's cleanup.
+        if (restoreStarted) {
+          setDocumentRestoreMode(document, false);
+
+          broadcastRestoreStatus(document, "failed");
         }
 
-        // 3. Verify that we still own the lock.
-        await assertDocumentLockOwnership(lock);
-
-        // 4. Load historical Yjs state in an isolated document.
-        const snapshotDoc = new Y.Doc();
-
-        let restoredNodes: Array<Y.XmlElement | Y.XmlText>;
-
-        try {
-          Y.applyUpdate(snapshotDoc, new Uint8Array(version.state));
-
-          const snapshotFragment = snapshotDoc.getXmlFragment("default");
-
-          restoredNodes = snapshotFragment
-            .toArray()
-            .map((node) => cloneXmlNode(node));
-        } finally {
-          snapshotDoc.destroy();
-        }
-
-        // 5. Verify lock ownership immediately before modifying live state.
-        await assertDocumentLockOwnership(lock);
-
-        // 6. Replace the live Tiptap XML fragment atomically.
-        const liveFragment = document.getXmlFragment("default");
-
-        document.transact(() => {
-          if (liveFragment.length > 0) {
-            liveFragment.delete(0, liveFragment.length);
-          }
-
-          if (restoredNodes.length > 0) {
-            liveFragment.insert(0, restoredNodes);
-          }
-        }, "collabdocs:restore-version");
-
-        // 7. Check ownership before persisting.
-        await assertDocumentLockOwnership(lock);
-
-        // 8. Persist the restored document.
-        await persistDocumentState(documentName, document);
-
-        // 9. Confirm that the lock was not lost.
-        await assertDocumentLockOwnership(lock);
-
-        console.log(
-          `[VERSION RESTORE] Successfully restored ${version.id} | ${documentName}`,
-        );
-      });
-
-      // The acknowledgement is sent only after the lock is released
-      // successfully by withDocumentLock's cleanup.
-      sendAcknowledgement(true);
+        throw error;
+      }
     } catch (error) {
       console.error(`[VERSION OPERATION] Failed | ${documentName}`, error);
 
