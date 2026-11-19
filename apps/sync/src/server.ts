@@ -153,7 +153,7 @@ function broadcastRestoreStatus(
 
 const server = new Server({
   port: PORT,
-
+  address: "0.0.0.0",
   name: "collabdocs-sync",
 
   // ===================================
@@ -166,9 +166,15 @@ const server = new Server({
       port: Number(redisUrl.port || 6379),
 
       options: {
+        username: redisUrl.username
+          ? decodeURIComponent(redisUrl.username)
+          : undefined,
+
         password: redisUrl.password
           ? decodeURIComponent(redisUrl.password)
           : undefined,
+
+        tls: redisUrl.protocol === "rediss:" ? {} : undefined,
       },
     }),
   ],
