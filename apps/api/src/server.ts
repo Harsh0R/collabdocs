@@ -18,15 +18,33 @@ import versionRoutes from "./routes/versions.routes.js";
 
 const app = express();
 
-const PORT = Number(process.env.API_PORT) || 4000;
+const PORT = Number(process.env.PORT || process.env.API_PORT || 4000);
 
 // Security
 app.use(helmet());
 
 // CORS
+// app.use(
+//   cors({
+//     origin: "http://localhost:3000",
+//     credentials: true,
+//   }),
+// );
+const allowedOrigins = (process.env.CORS_ORIGINS || "http://localhost:3000")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
 app.use(
   cors({
-    origin: "http://localhost:3000",
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error("Not allowed by CORS"));
+    },
     credentials: true,
   }),
 );
@@ -100,10 +118,10 @@ app.use((_req, res) => {
 // Central error handler (must be last)
 app.use(errorHandler);
 
-const server = app.listen(PORT, "127.0.0.1", () => {
-    console.log(`CollabDocs API running at http://127.0.0.1:${PORT}`);
+const server = app.listen(PORT, "0.0.0.0", () => {
+  console.log(`CollabDocs API running on port ${PORT}`);
 });
 
 server.on("error", (error) => {
-    console.error("[API SERVER ERROR]", error);
+  console.error("[API SERVER ERROR]", error);
 });

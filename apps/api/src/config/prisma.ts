@@ -1,14 +1,8 @@
 // apps/api/src/config/prisma.ts
 
-
-import dotenv from "dotenv";
 import { PrismaClient } from "@prisma/client";
 import "./env.js";
 
-// Load root environment variables
-dotenv.config({ path: "../../.env" });
-
-// Prevent multiple Prisma instances during development
 const globalForPrisma = globalThis as unknown as {
     prisma: PrismaClient | undefined;
 };

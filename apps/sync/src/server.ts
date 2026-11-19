@@ -13,7 +13,7 @@ import {
   withDocumentLock,
 } from "./utils/redis-lock.js";
 
-const PORT = Number(process.env.SYNC_PORT) || 1234;
+const PORT = Number(process.env.PORT || process.env.SYNC_PORT || 1234);
 
 const redisUrl = new URL(process.env.REDIS_URL || "redis://localhost:6379");
 

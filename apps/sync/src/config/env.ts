@@ -1,3 +1,4 @@
+// apps/sync/src/config/env.ts
 
 import dotenv from "dotenv";
 import path from "node:path";
