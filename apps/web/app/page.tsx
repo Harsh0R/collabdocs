@@ -1,4 +1,3 @@
-
 import Link from "next/link";
 
 const features = [
@@ -36,7 +35,8 @@ const steps = [
   {
     number: "01",
     title: "Create a document",
-    description: "Start with a blank document and bring your ideas into one shared workspace.",
+    description:
+      "Start with a blank document and bring your ideas into one shared workspace.",
   },
   {
     number: "02",
@@ -46,7 +46,8 @@ const steps = [
   {
     number: "03",
     title: "Build together",
-    description: "See edits in real time and keep your team's work moving forward.",
+    description:
+      "See edits in real time and keep your team's work moving forward.",
   },
 ];
 
@@ -109,7 +110,7 @@ function EditorPreview() {
               <div className="flex items-center gap-2">
                 <span>◷</span> Recent
               </div>
-                <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2">
                 <span>♧</span> Shared with me
               </div>
             </div>
@@ -138,9 +139,7 @@ function EditorPreview() {
                 <p className="mb-1 text-[10px] uppercase tracking-widest text-slate-500">
                   Last edited just now
                 </p>
-                <p className="text-xs text-slate-400">
-                  Product Strategy
-                </p>
+                <p className="text-xs text-slate-400">Product Strategy</p>
               </div>
               <span className="rounded-lg border border-emerald-400/20 bg-emerald-400/10 px-3 py-1.5 text-[10px] font-medium text-emerald-300">
                 ● Live collaboration
@@ -155,9 +154,8 @@ function EditorPreview() {
               </h3>
 
               <p className="mb-7 text-xs leading-6 text-slate-400 sm:text-sm">
-                Great products are built through great collaboration.
-                Bring your team's ideas together and turn them into
-                meaningful progress.
+                Great products are built through great collaboration. Bring your
+                team's ideas together and turn them into meaningful progress.
               </p>
 
               <div className="mb-6 space-y-3">
@@ -171,9 +169,8 @@ function EditorPreview() {
                   Alex is editing
                 </div>
                 <p className="text-xs leading-6 text-slate-300">
-                  Our next milestone is to create a workspace where every
-                  team member can contribute, share feedback, and stay
-                  aligned.
+                  Our next milestone is to create a workspace where every team
+                  member can contribute, share feedback, and stay aligned.
                   <span className="ml-1 inline-block h-4 w-0.5 translate-y-1 animate-pulse bg-indigo-400" />
                 </p>
               </div>
@@ -206,9 +203,15 @@ export default function Home() {
           <Logo />
 
           <div className="hidden items-center gap-9 text-sm text-slate-400 md:flex">
-            <a href="#features" className="transition hover:text-white">Features</a>
-            <a href="#how-it-works" className="transition hover:text-white">How it works</a>
-            <a href="#technology" className="transition hover:text-white">Technology</a>
+            <a href="#features" className="transition hover:text-white">
+              Features
+            </a>
+            <a href="#how-it-works" className="transition hover:text-white">
+              How it works
+            </a>
+            <a href="#technology" className="transition hover:text-white">
+              Technology
+            </a>
           </div>
 
           <div className="flex items-center gap-3">
@@ -234,8 +237,8 @@ export default function Home() {
 
         <div className="relative mx-auto max-w-7xl text-center">
           <div className="mb-7 inline-flex items-center gap-2 rounded-full border border-indigo-400/20 bg-indigo-400/[0.07] px-4 py-2 text-xs font-medium text-indigo-300">
-            <span className="h-2 w-2 rounded-full bg-indigo-400" />
-            A better way to work together
+            <span className="h-2 w-2 rounded-full bg-indigo-400" />A better way
+            to work together
             <span>✦</span>
           </div>
 
@@ -248,8 +251,8 @@ export default function Home() {
           </h1>
 
           <p className="mx-auto mt-7 max-w-2xl text-base leading-8 text-slate-400 sm:text-lg">
-            Create documents, collaborate in real time, and bring your
-            team's best ideas to life. Work better, together, with CollabDocs.
+            Create documents, collaborate in real time, and bring your team's
+            best ideas to life. Work better, together, with CollabDocs.
           </p>
 
           <div className="mt-9 flex flex-col items-center justify-center gap-4 sm:flex-row">
@@ -258,7 +261,9 @@ export default function Home() {
               className="group rounded-xl bg-indigo-500 px-7 py-3.5 text-sm font-semibold text-white shadow-xl shadow-indigo-500/20 transition hover:-translate-y-0.5 hover:bg-indigo-400"
             >
               Start collaborating
-              <span className="ml-2 transition group-hover:translate-x-1">→</span>
+              <span className="ml-2 transition group-hover:translate-x-1">
+                →
+              </span>
             </Link>
             <a
               href="#features"
@@ -286,7 +291,10 @@ export default function Home() {
       </section>
 
       {/* Features */}
-      <section id="features" className="border-t border-white/[0.06] px-5 py-24 sm:px-8">
+      <section
+        id="features"
+        className="border-t border-white/[0.06] px-5 py-24 sm:px-8"
+      >
         <div className="mx-auto max-w-7xl">
           <div className="max-w-2xl">
             <p className="mb-4 text-xs font-semibold uppercase tracking-[0.22em] text-indigo-400">
@@ -298,8 +306,8 @@ export default function Home() {
               <span className="text-slate-500">More creating.</span>
             </h2>
             <p className="mt-5 leading-7 text-slate-400">
-              Everything your team needs to create, organize, and collaborate
-              on documents in one focused workspace.
+              Everything your team needs to create, organize, and collaborate on
+              documents in one focused workspace.
             </p>
           </div>
 
@@ -310,8 +318,12 @@ export default function Home() {
                 className="group rounded-2xl border border-white/[0.08] bg-white/[0.025] p-6 transition duration-300 hover:-translate-y-1 hover:border-indigo-400/30 hover:bg-indigo-400/[0.05]"
               >
                 <div className="mb-8 flex items-center justify-between">
-                  <span className="text-2xl text-indigo-400">{feature.icon}</span>
-                  <span className="text-xs text-slate-600">{feature.number}</span>
+                  <span className="text-2xl text-indigo-400">
+                    {feature.icon}
+                  </span>
+                  <span className="text-xs text-slate-600">
+                    {feature.number}
+                  </span>
                 </div>
                 <h3 className="mb-3 text-lg font-semibold">{feature.title}</h3>
                 <p className="text-sm leading-7 text-slate-400">
@@ -373,14 +385,23 @@ export default function Home() {
                 for teamwork.
               </h2>
               <p className="mt-5 leading-7 text-slate-400">
-                CollabDocs brings together a modern web stack and
-                real-time collaboration technologies to power a shared
-                document experience.
+                CollabDocs brings together a modern web stack and real-time
+                collaboration technologies to power a shared document
+                experience.
               </p>
             </div>
 
             <div className="mt-10 flex flex-wrap gap-3">
-              {["Next.js", "TypeScript", "Node.js", "PostgreSQL", "Redis", "WebSockets", "Yjs", "Tiptap"].map((tech) => (
+              {[
+                "Next.js",
+                "TypeScript",
+                "Node.js",
+                "PostgreSQL",
+                "Redis",
+                "WebSockets",
+                "Yjs",
+                "Tiptap",
+              ].map((tech) => (
                 <span
                   key={tech}
                   className="rounded-xl border border-white/10 bg-white/[0.05] px-5 py-3 text-sm font-medium text-slate-300"
@@ -407,8 +428,8 @@ export default function Home() {
               <span className="text-indigo-400"> working together.</span>
             </h2>
             <p className="mx-auto mt-5 max-w-xl leading-7 text-slate-400">
-              Bring your team together, share your ideas, and create
-              something meaningful with CollabDocs.
+              Bring your team together, share your ideas, and create something
+              meaningful with CollabDocs.
             </p>
             <Link
               href="/login"
@@ -437,7 +458,7 @@ export default function Home() {
           </div>
         </div>
         <p className="mt-7 text-center text-[11px] text-slate-600">
-          © {new Date().getFullYear()} CollabDocs. All rights reserved.
+          © 2026 CollabDocs. All rights reserved.
         </p>
       </footer>
     </main>
