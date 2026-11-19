@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -146,8 +145,9 @@ export default function VersionHistoryPanel({
 }: Props) {
   const [versions, setVersions] = useState<DocumentVersion[]>([]);
 
-  const [selectedVersion, setSelectedVersion] =
-    useState<VersionDetail | null>(null);
+  const [selectedVersion, setSelectedVersion] = useState<VersionDetail | null>(
+    null,
+  );
 
   const [loading, setLoading] = useState(true);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -175,9 +175,7 @@ export default function VersionHistoryPanel({
       setVersions(result.data.versions);
     } catch (err) {
       setError(
-        err instanceof Error
-          ? err.message
-          : "Unable to load version history.",
+        err instanceof Error ? err.message : "Unable to load version history.",
       );
     } finally {
       setLoading(false);
@@ -205,9 +203,7 @@ export default function VersionHistoryPanel({
       setSelectedVersion(result.data.version);
     } catch (err) {
       setError(
-        err instanceof Error
-          ? err.message
-          : "Unable to load version preview.",
+        err instanceof Error ? err.message : "Unable to load version preview.",
       );
 
       setSelectedVersion(null);
@@ -238,6 +234,8 @@ export default function VersionHistoryPanel({
     setRestoreMessage("");
 
     try {
+      
+      // await new Promise((resolve) => setTimeout(resolve, 3000));
       await onRestore(selectedVersion.id);
 
       setRestoreMessage(
@@ -247,11 +245,19 @@ export default function VersionHistoryPanel({
       // Refresh the list so the automatically created backup appears.
       await loadVersions();
     } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Unable to restore this version.",
-      );
+      const message =
+        err instanceof Error ? err.message : "Unable to restore this version.";
+
+      if (
+        message.toLowerCase().includes("currently being restored") ||
+        message.toLowerCase().includes("another user")
+      ) {
+        setError(
+          "Another collaborator is currently restoring this document. Please try again shortly.",
+        );
+      } else {
+        setError(message);
+      }
     } finally {
       setRestoringVersionId(null);
     }
@@ -410,8 +416,7 @@ export default function VersionHistoryPanel({
                   </h3>
 
                   <p className="mt-1 text-xs text-slate-500">
-                    Saved by{" "}
-                    {selectedVersion.createdBy?.name || "Unknown user"}
+                    Saved by {selectedVersion.createdBy?.name || "Unknown user"}
                   </p>
                 </div>
 

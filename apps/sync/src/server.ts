@@ -8,6 +8,7 @@ import * as Y from "yjs";
 
 import { prisma } from "./config/prisma.js";
 import { verifySyncToken } from "./utils/auth.js";
+import { assertDocumentLockOwnership, withDocumentLock } from "./utils/redis-lock.js";
 
 const PORT = Number(process.env.SYNC_PORT) || 1234;
 
@@ -385,6 +386,10 @@ const server = new Server({
       // RESTORE HISTORICAL VERSION
       // ===================================
 
+      // ===================================
+      // RESTORE HISTORICAL VERSION
+      // ===================================
+
       if (typeof message.versionId !== "string") {
         sendAcknowledgement(false, "Missing version ID");
         return;
@@ -394,72 +399,85 @@ const server = new Server({
         `[VERSION RESTORE] Request received | ${documentName} | ${message.versionId}`,
       );
 
-      // Find the requested version belonging to this document.
-      const version = await prisma.documentVersion.findFirst({
-        where: {
-          id: message.versionId,
-          documentId: documentName,
-        },
+      await withDocumentLock(documentName, async (lock) => {
+        // 1. Verify lock ownership before starting.
+        await assertDocumentLockOwnership(lock);
 
-        select: {
-          id: true,
-          state: true,
-        },
+        // 2. Find the requested version belonging to this document.
+        const version = await prisma.documentVersion.findFirst({
+          where: {
+            id: message.versionId as string,
+            documentId: documentName,
+          },
+          select: {
+            id: true,
+            state: true,
+          },
+        });
+
+        if (!version) {
+          throw new Error("Document version not found");
+        }
+
+        // 3. Verify that we still own the lock.
+        await assertDocumentLockOwnership(lock);
+
+        // 4. Load historical Yjs state in an isolated document.
+        const snapshotDoc = new Y.Doc();
+
+        let restoredNodes: Array<Y.XmlElement | Y.XmlText>;
+
+        try {
+          Y.applyUpdate(snapshotDoc, new Uint8Array(version.state));
+
+          const snapshotFragment = snapshotDoc.getXmlFragment("default");
+
+          restoredNodes = snapshotFragment
+            .toArray()
+            .map((node) => cloneXmlNode(node));
+        } finally {
+          snapshotDoc.destroy();
+        }
+
+        // 5. Verify lock ownership immediately before modifying live state.
+        await assertDocumentLockOwnership(lock);
+
+        // 6. Replace the live Tiptap XML fragment atomically.
+        const liveFragment = document.getXmlFragment("default");
+
+        document.transact(() => {
+          if (liveFragment.length > 0) {
+            liveFragment.delete(0, liveFragment.length);
+          }
+
+          if (restoredNodes.length > 0) {
+            liveFragment.insert(0, restoredNodes);
+          }
+        }, "collabdocs:restore-version");
+
+        // 7. Check ownership before persisting.
+        await assertDocumentLockOwnership(lock);
+
+        // 8. Persist the restored document.
+        await persistDocumentState(documentName, document);
+
+        // 9. Confirm that the lock was not lost.
+        await assertDocumentLockOwnership(lock);
+
+        console.log(
+          `[VERSION RESTORE] Successfully restored ${version.id} | ${documentName}`,
+        );
       });
 
-      if (!version) {
-        sendAcknowledgement(false, "Document version not found");
-        return;
-      }
-
-      // Decode the historical Yjs snapshot in an isolated document.
-      const snapshotDoc = new Y.Doc();
-
-      let restoredNodes: Array<Y.XmlElement | Y.XmlText>;
-
-      try {
-        Y.applyUpdate(snapshotDoc, new Uint8Array(version.state));
-
-        const snapshotFragment = snapshotDoc.getXmlFragment("default");
-
-        // Clone the snapshot's nodes into independent Yjs types.
-        restoredNodes = snapshotFragment
-          .toArray()
-          .map((node) => cloneXmlNode(node));
-      } finally {
-        snapshotDoc.destroy();
-      }
-
-      // Get the live Tiptap collaboration fragment.
-      const liveFragment = document.getXmlFragment("default");
-
-      // Replace the existing content in one Yjs transaction.
-      document.transact(() => {
-        if (liveFragment.length > 0) {
-          liveFragment.delete(0, liveFragment.length);
-        }
-
-        if (restoredNodes.length > 0) {
-          liveFragment.insert(0, restoredNodes);
-        }
-      }, "collabdocs:restore-version");
-
-      // Persist the restored live document.
-      await persistDocumentState(documentName, document);
-
-      console.log(
-        `[VERSION RESTORE] Successfully restored ${version.id} | ${documentName}`,
-      );
-
+      // The acknowledgement is sent only after the lock is released
+      // successfully by withDocumentLock's cleanup.
       sendAcknowledgement(true);
     } catch (error) {
       console.error(`[VERSION OPERATION] Failed | ${documentName}`, error);
 
       sendAcknowledgement(
         false,
-        isRestoreRequest
-          ? "Could not restore document version"
-          : "Could not persist document state",
+        error instanceof Error ? error.message : "Document operation failed",
       );
     }
   },

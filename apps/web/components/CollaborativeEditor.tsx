@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -516,14 +515,16 @@ export default function CollaborativeEditor({
         "Version restored successfully. Your previous content was saved as a backup.",
       );
     } catch (error) {
-      console.error("Restore version failed:", error);
+      const message =
+        error instanceof Error ? error.message : "Restore failed.";
 
-      setSaveError(true);
-      setSaveMessage(
-        error instanceof Error
-          ? error.message
-          : "Failed to restore document version.",
-      );
+      const isLockConflict =
+        message.toLowerCase().includes("currently being restored") ||
+        message.toLowerCase().includes("another user");
+
+      if (!isLockConflict) {
+        console.error("[RESTORE] Failed:", error);
+      }
 
       throw error;
     } finally {
