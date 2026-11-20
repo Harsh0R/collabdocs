@@ -216,10 +216,10 @@ export default function Home() {
 
           <div className="flex items-center gap-3">
             <Link
-              href="/login"
+              href="/register"
               className="hidden text-sm font-medium text-slate-300 transition hover:text-white sm:block"
             >
-              Sign in
+              Register
             </Link>
             <Link
               href="/login"
@@ -257,7 +257,7 @@ export default function Home() {
 
           <div className="mt-9 flex flex-col items-center justify-center gap-4 sm:flex-row">
             <Link
-              href="/login"
+              href="/register"
               className="group rounded-xl bg-indigo-500 px-7 py-3.5 text-sm font-semibold text-white shadow-xl shadow-indigo-500/20 transition hover:-translate-y-0.5 hover:bg-indigo-400"
             >
               Start collaborating
